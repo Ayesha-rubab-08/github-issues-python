@@ -1,7 +1,14 @@
 import json
+import logging
 import os
+import time
+
 import requests
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 
 def clean_issue(issue):
     return {
@@ -14,35 +21,102 @@ def clean_issue(issue):
 
 
 def fetch_page(url, headers, page):
-    try:
-        response = requests.get(
-            url,
-            headers=headers,
-            params={"per_page": 10, "page": page},
-            timeout=10,
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as error:
-        print("Request failed on page", page, "-", error)
-        raise SystemExit(1)
+    max_retries = 4
+    retry_delays = [1, 2, 4, 8]
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                params={"per_page": 10, "page": page},
+                timeout=10,
+            )
+
+            is_rate_limited = response.status_code == 429 or (
+                response.status_code == 403
+                and response.headers.get("X-RateLimit-Remaining") == "0"
+            )
+
+            if is_rate_limited:
+                if attempt == max_retries:
+                    response.raise_for_status()
+
+                retry_after = response.headers.get("Retry-After")
+
+                if retry_after and retry_after.isdigit():
+                    wait_time = int(retry_after)
+                else:
+                    wait_time = retry_delays[attempt]
+
+                logging.warning("Rate limited. Waiting %s seconds.", wait_time)
+                time.sleep(wait_time)
+                continue
+
+            if 500 <= response.status_code <= 599:
+                if attempt == max_retries:
+                    response.raise_for_status()
+
+                wait_time = retry_delays[attempt]
+                logging.warning("Server error: %s", response.status_code)
+                logging.warning("Retrying in %s seconds.", wait_time)
+                time.sleep(wait_time)
+                continue
+
+            response.raise_for_status()
+            return response.json()
+
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as error:
+            if attempt == max_retries:
+                logging.error("Request failed on page %s - %s", page, error)
+                raise SystemExit(1)
+
+            wait_time = retry_delays[attempt]
+            logging.warning("Network error: %s", error)
+            logging.warning("Retrying in %s seconds.", wait_time)
+            time.sleep(wait_time)
+            continue
+        except requests.exceptions.RequestException as error:
+            logging.error("Request failed on page %s - %s", page, error)
+            raise SystemExit(1)
+
+    raise SystemExit("Maximum retries exceeded on page " + str(page))
 
 
-token = os.environ.get("GITHUB_TOKEN")
-if not token:
-    raise SystemExit("GITHUB_TOKEN is not set")
+def main():
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit("GITHUB_TOKEN is not set")
 
-url = "https://api.github.com/repos/n8n-io/n8n/issues"
-headers = {"Authorization": f"Bearer {token}"}
+    url = "https://api.github.com/repos/n8n-io/n8n/issues"
+    headers = {"Authorization": f"Bearer {token}"}
 
-all_issues = []
-for page in range(1, 4):
-    batch = fetch_page(url, headers, page)
-    if not batch:
-        break
-    all_issues.extend(clean_issue(issue) for issue in batch)
-    print("page", page, "got", len(batch))
+    all_issues = []
+    seen_ids = set()
+    for page in range(1, 4):
+        batch = fetch_page(url, headers, page)
+        if not batch:
+            break
+        added = 0
+        for issue in batch:
+            if issue["id"] in seen_ids:
+                logging.warning("Skipping duplicate issue id %s", issue["id"])
+                continue
+            seen_ids.add(issue["id"])
+            all_issues.append(clean_issue(issue))
+            added += 1
+        logging.info("Page %s got %s issues, added %s", page, len(batch), added)
 
-with open("issues.json", "w", encoding="utf-8") as f:
-    json.dump(all_issues, f, indent=2)
-print("saved", len(all_issues), "issues")
+    tmp_path = "issues.json.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(all_issues, f, indent=2)
+    os.replace(tmp_path, "issues.json")
+
+    logging.info("Saved %s issues", len(all_issues))
+
+
+if __name__ == "__main__":
+    main()
