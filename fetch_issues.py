@@ -110,8 +110,10 @@ def main():
             added += 1
         logging.info("Page %s got %s issues, added %s", page, len(batch), added)
 
-    with open("issues.json", "w", encoding="utf-8") as f:
+    tmp_path = "issues.json.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(all_issues, f, indent=2)
+    os.replace(tmp_path, "issues.json")
 
     logging.info("Saved %s issues", len(all_issues))
 
