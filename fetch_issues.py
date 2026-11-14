@@ -55,6 +55,19 @@ def fetch_page(url, headers, page):
             response.raise_for_status()
             return response.json()
 
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as error:
+            if attempt == max_retries:
+                print("Request failed on page", page, "-", error)
+                raise SystemExit(1)
+
+            wait_time = retry_delays[attempt]
+            print("Network error:", error)
+            print("Retrying in", wait_time, "seconds.")
+            time.sleep(wait_time)
+            continue
         except requests.exceptions.RequestException as error:
             print("Request failed on page", page, "-", error)
             raise SystemExit(1)
