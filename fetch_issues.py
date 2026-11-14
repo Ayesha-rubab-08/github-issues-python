@@ -27,7 +27,12 @@ def fetch_page(url, headers, page):
                 timeout=10,
             )
 
-            if response.status_code == 429:
+            is_rate_limited = response.status_code == 429 or (
+                response.status_code == 403
+                and response.headers.get("X-RateLimit-Remaining") == "0"
+            )
+
+            if is_rate_limited:
                 if attempt == max_retries:
                     response.raise_for_status()
 
