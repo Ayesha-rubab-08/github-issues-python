@@ -1,8 +1,14 @@
 import json
+import logging
 import os
 import time
 
 import requests
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 
 def clean_issue(issue):
     return {
@@ -43,7 +49,7 @@ def fetch_page(url, headers, page):
                 else:
                     wait_time = retry_delays[attempt]
 
-                print("Rate limited. Waiting", wait_time, "seconds.")
+                logging.warning("Rate limited. Waiting %s seconds.", wait_time)
                 time.sleep(wait_time)
                 continue
 
@@ -52,8 +58,8 @@ def fetch_page(url, headers, page):
                     response.raise_for_status()
 
                 wait_time = retry_delays[attempt]
-                print("Server error:", response.status_code)
-                print("Retrying in", wait_time, "seconds.")
+                logging.warning("Server error: %s", response.status_code)
+                logging.warning("Retrying in %s seconds.", wait_time)
                 time.sleep(wait_time)
                 continue
 
@@ -65,16 +71,16 @@ def fetch_page(url, headers, page):
             requests.exceptions.ConnectionError,
         ) as error:
             if attempt == max_retries:
-                print("Request failed on page", page, "-", error)
+                logging.error("Request failed on page %s - %s", page, error)
                 raise SystemExit(1)
 
             wait_time = retry_delays[attempt]
-            print("Network error:", error)
-            print("Retrying in", wait_time, "seconds.")
+            logging.warning("Network error: %s", error)
+            logging.warning("Retrying in %s seconds.", wait_time)
             time.sleep(wait_time)
             continue
         except requests.exceptions.RequestException as error:
-            print("Request failed on page", page, "-", error)
+            logging.error("Request failed on page %s - %s", page, error)
             raise SystemExit(1)
 
     raise SystemExit("Maximum retries exceeded on page " + str(page))
@@ -94,12 +100,12 @@ def main():
         if not batch:
             break
         all_issues.extend(clean_issue(issue) for issue in batch)
-        print("page", page, "got", len(batch))
+        logging.info("Page %s got %s issues", page, len(batch))
 
     with open("issues.json", "w", encoding="utf-8") as f:
         json.dump(all_issues, f, indent=2)
 
-    print("saved", len(all_issues), "issues")
+    logging.info("Saved %s issues", len(all_issues))
 
 
 if __name__ == "__main__":
