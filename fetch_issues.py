@@ -95,12 +95,20 @@ def main():
     headers = {"Authorization": f"Bearer {token}"}
 
     all_issues = []
+    seen_ids = set()
     for page in range(1, 4):
         batch = fetch_page(url, headers, page)
         if not batch:
             break
-        all_issues.extend(clean_issue(issue) for issue in batch)
-        logging.info("Page %s got %s issues", page, len(batch))
+        added = 0
+        for issue in batch:
+            if issue["id"] in seen_ids:
+                logging.warning("Skipping duplicate issue id %s", issue["id"])
+                continue
+            seen_ids.add(issue["id"])
+            all_issues.append(clean_issue(issue))
+            added += 1
+        logging.info("Page %s got %s issues, added %s", page, len(batch), added)
 
     with open("issues.json", "w", encoding="utf-8") as f:
         json.dump(all_issues, f, indent=2)
