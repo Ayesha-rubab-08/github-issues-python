@@ -117,6 +117,9 @@ def main():
 
     logging.info("Saved %s issues", len(all_issues))
 
+    from db import save_issues
+    save_issues(all_issues)
+
 
 if __name__ == "__main__":
     main()
